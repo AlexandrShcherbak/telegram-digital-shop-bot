@@ -1,0 +1,38 @@
+{
+  "1": {
+    "name": "Бот магазин",
+    "desc": "Бот для продажи цифровых товаров",
+    "price": 79,
+    "currency": "RUB",
+    "content": "Vbnnjhh567",
+    "pay_url": "Payment.com",
+    "category": "Боты"
+  },
+  "2": {
+    "name": "ИИ бот",
+    "desc": "Бот с ИИ",
+    "price": 59,
+    "currency": "RUB",
+    "content": "Fyihf567",
+    "pay_url": "Paypal",
+    "category": "Боты"
+  },
+  "3": {
+    "name": "Testing bot",
+    "desc": "Bot is easy",
+    "price": 5,
+    "currency": "USD",
+    "content": "Cvnvdv345",
+    "pay_url": "Paypal",
+    "category": "Боты"
+  },
+  "4": {
+    "name": "Battlefield 5",
+    "desc": "Для покупки товара Battlefield 5 оплатите 2999 RUB по ссылке:\nPaypal\n\nПосле оплаты пришлите сюда скриншот чека или номер транзакции.",
+    "price": 2999,
+    "currency": "RUB",
+    "content": "Ключ",
+    "pay_url": "https://test.com",
+    "category": "Ключи для игры"
+  }
+}
