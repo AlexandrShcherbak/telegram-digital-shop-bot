@@ -240,7 +240,7 @@ async def show_catalog(call: types.CallbackQuery):
         await call.message.answer(t(call.from_user.id, "category_empty"))
         await call.answer()
         return
-    text = f"🛒 <b>{cat}</b>\n\n"
+    text = f"🛒 <b>{safe_html(cat)}</b>\n\n"
     lang = get_lang(call.from_user.id)
     price_word = LANGUAGES[lang]["price"]
     keyboard = [
@@ -250,8 +250,8 @@ async def show_catalog(call: types.CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=keyboard)
     for pid, prod in items:
         text += (
-            f"🔹 <b>{prod['name']}</b>\n"
-            f"📝 {prod['desc']}\n"
+            f"🔹 <b>{safe_html(prod['name'])}</b>\n"
+            f"📝 {safe_html(prod['desc'])}\n"
             f"💵 <b>{price_word}:</b> {prod['price']} {prod['currency']}\n\n"
         )
     await call.message.answer(text, parse_mode="HTML", reply_markup=kb)
@@ -459,7 +459,7 @@ async def buy_product(call: types.CallbackQuery):
         await call.answer(t(call.from_user.id, "not_found"), show_alert=True)
         return
     await call.message.answer(
-        t(call.from_user.id, "buy_info", name=prod['name'], desc=prod['desc'], price=prod['price'], currency=prod['currency'], pay_url=prod['pay_url']),
+        t(call.from_user.id, "buy_info", name=safe_html(prod['name']), desc=safe_html(prod['desc']), price=prod['price'], currency=safe_html(prod['currency']), pay_url=safe_html(prod['pay_url'])),
         parse_mode="HTML"
     )
     user_states[call.from_user.id] = {"waiting_payment": pid, "lang": get_lang(call.from_user.id)}
@@ -565,14 +565,16 @@ async def my_purchases(msg: types.Message):
         return
     text = t(msg.from_user.id, "your_purchases")
     for i, prod in enumerate(items, 1):
-        text += f"{i}. <b>{prod['name']}</b> ({prod['desc']}) — <code>{prod['content']}</code>\n"
+        text += f"{i}. <b>{safe_html(prod['name'])}</b> ({safe_html(prod['desc'])}) — <code>{safe_html(prod['content'])}</code>\n"
     await msg.answer(text, parse_mode="HTML")
 
 CATALOG_FILE = "products.json"
 
 def save_products():
-    with open(CATALOG_FILE, "w", encoding="utf-8") as f:
-        json.dump(products, f, ensure_ascii=False, indent=2)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, dir=".") as tmp:
+        json.dump(products, tmp, ensure_ascii=False, indent=2)
+        tmp_path = tmp.name
+    os.replace(tmp_path, CATALOG_FILE)
 
 def load_products():
     global products, product_id_counter
