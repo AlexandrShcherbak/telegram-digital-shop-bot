@@ -4,7 +4,6 @@ import logging
 import os
 import json
 import asyncio
-import tempfile
 from html import escape
 from urllib.parse import urlparse
 from aiogram import Bot, Dispatcher, types, F, Router
@@ -27,8 +26,6 @@ ADMIN_IDS = [
     for admin_id in os.getenv("ADMIN_IDS", "1353502819").split(",")
     if admin_id.strip().isdigit()
 ]
-if not ADMIN_IDS:
-    raise RuntimeError("ADMIN_IDS is empty or invalid")
 
 logging.basicConfig(level=logging.INFO)
 
@@ -156,18 +153,6 @@ def get_lang(user_id):
 def is_valid_payment_url(url: str) -> bool:
     parsed = urlparse(url.strip())
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
-
-
-def safe_html(text: str) -> str:
-    return escape(str(text), quote=False)
-
-
-def parse_action_callback(data: str):
-    parts = data.split("_", 2)
-    if len(parts) != 3 or parts[0] not in {"approve", "decline"}:
-        raise ValueError("Invalid callback payload")
-    return parts[0], int(parts[1]), int(parts[2])
-
 
 def t(user_id, key, **kwargs):
     lang = get_lang(user_id)
@@ -528,17 +513,9 @@ async def process_payment_decision(call: types.CallbackQuery):
         await call.answer(t(call.from_user.id, "access_denied"), show_alert=True)
         return
 
-    try:
-        action, user_id, pid = parse_action_callback(call.data)
-    except (ValueError, TypeError):
-        await call.answer("Некорректный callback", show_alert=True)
-        return
-
-    pending = pending_payments.get(user_id)
-    if not pending or pending.get("pid") != pid:
-        await call.answer("Платёж уже обработан или не найден", show_alert=True)
-        return
-
+    action, user_id, pid = call.data.split("_")
+    user_id = int(user_id)
+    pid = int(pid)
     prod = products.get(pid)
     user_lang = get_lang(user_id)
     if not prod:
