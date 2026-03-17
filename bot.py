@@ -4,6 +4,8 @@ import logging
 import os
 import json
 import asyncio
+from html import escape
+from urllib.parse import urlparse
 from aiogram import Bot, Dispatcher, types, F, Router
 from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton,
@@ -15,8 +17,15 @@ products = {}
 product_id_counter = 1
 user_states = {}  
 
-API_TOKEN = '8246017060:AAFENf3aCiMi57qldIpUzrHePP-RuZF7zxI' # Замените на ваш токен бота
-ADMIN_IDS = [1353502819] # Список Telegram ID админов
+API_TOKEN = os.getenv("BOT_TOKEN", "")
+if not API_TOKEN:
+    raise RuntimeError("BOT_TOKEN is not set")
+
+ADMIN_IDS = [
+    int(admin_id.strip())
+    for admin_id in os.getenv("ADMIN_IDS", "1353502819").split(",")
+    if admin_id.strip().isdigit()
+]
 
 logging.basicConfig(level=logging.INFO)
 
@@ -139,6 +148,11 @@ LANGUAGES = {
 
 def get_lang(user_id):
     return user_states.get(user_id, {}).get("lang", "ru")
+
+
+def is_valid_payment_url(url: str) -> bool:
+    parsed = urlparse(url.strip())
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 def t(user_id, key, **kwargs):
     lang = get_lang(user_id)
@@ -321,13 +335,18 @@ async def add_product_content(msg: types.Message):
 async def add_product_pay_url(msg: types.Message):
     global product_id_counter
     state = user_states[msg.from_user.id]
+    pay_url = msg.text.strip()
+    if not is_valid_payment_url(pay_url):
+        await msg.answer(t(msg.from_user.id, "enter_pay_url"))
+        return
+
     products[product_id_counter] = {
         "name": state["name"],
         "desc": state["desc"],
         "price": state["price"],
         "currency": state["currency"],
         "content": state["content"],
-        "pay_url": msg.text,
+        "pay_url": pay_url,
         "category": state["category"]
     }
     save_products()
@@ -387,6 +406,8 @@ async def change_price_choose(call: types.CallbackQuery):
 async def change_price_set(msg: types.Message):
     try:
         price = int(msg.text)
+        if price <= 0:
+            raise ValueError
         pid = user_states[msg.from_user.id]["pid"]
         products[pid]["price"] = price
         save_products()
@@ -396,7 +417,7 @@ async def change_price_set(msg: types.Message):
         )
         lang = user_states[msg.from_user.id].get("lang", "ru")
         user_states[msg.from_user.id] = {"lang": lang}
-    except Exception:
+    except (ValueError, TypeError, KeyError):
         await msg.answer(t(msg.from_user.id, "enter_number"))
 
 # --- Удаление товара ---
@@ -488,6 +509,10 @@ async def handle_payment_proof(msg: types.Message):
 
 @router.callback_query(lambda c: c.data.startswith("approve_") or c.data.startswith("decline_"))
 async def process_payment_decision(call: types.CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS:
+        await call.answer(t(call.from_user.id, "access_denied"), show_alert=True)
+        return
+
     action, user_id, pid = call.data.split("_")
     user_id = int(user_id)
     pid = int(pid)
@@ -504,7 +529,7 @@ async def process_payment_decision(call: types.CallbackQuery):
         pending_payments.pop(user_id, None)
         await bot.send_message(
             user_id,
-            t(user_id, "payment_approved", content=prod['content']),
+            t(user_id, "payment_approved", content=escape(prod['content'])),
             parse_mode="HTML"
         )
         try:
@@ -553,7 +578,11 @@ def load_products():
     global products, product_id_counter
     if os.path.exists(CATALOG_FILE):
         with open(CATALOG_FILE, "r", encoding="utf-8") as f:
-            loaded = json.load(f)
+            try:
+                loaded = json.load(f)
+            except json.JSONDecodeError:
+                logging.exception("Invalid JSON in %s", CATALOG_FILE)
+                loaded = {}
             products.update({int(k): v for k, v in loaded.items()})
         if products:
             product_id_counter = max(products.keys()) + 1
@@ -565,4 +594,3 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
-

@@ -1,18 +1,24 @@
 class ProductCatalog:
     def __init__(self):
-        self.products = []
+        self._products_by_id = {}
 
     def add_product(self, product):
-        self.products.append(product)
+        product_id = product["id"]
+        self._products_by_id[product_id] = product
 
     def list_products(self):
-        return self.products
+        return list(self._products_by_id.values())
 
     def get_product_details(self, product_id):
-        for product in self.products:
-            if product['id'] == product_id:
-                return product
-        return None
+        return self._products_by_id.get(product_id)
+
+    def remove_product(self, product_id):
+        return self._products_by_id.pop(product_id, None) is not None
 
     def search_products(self, query):
-        return [product for product in self.products if query.lower() in product['name'].lower()]
+        query_l = query.lower()
+        return [
+            product
+            for product in self._products_by_id.values()
+            if query_l in product["name"].lower()
+        ]
