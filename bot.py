@@ -4,14 +4,24 @@ import logging
 import os
 import json
 import asyncio
+import tempfile
 from html import escape
 from urllib.parse import urlparse
+from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, F, Router
 from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton,
     InlineKeyboardMarkup, InlineKeyboardButton
 )
 from aiogram.filters import Command
+
+# Загружаем переменные окружения из .env файла
+load_dotenv()
+
+# Функция для безопасного отображения HTML
+def safe_html(text):
+    """Экранирует текст для безопасного отображения в HTML"""
+    return escape(str(text))
 
 products = {}
 product_id_counter = 1
