@@ -35,6 +35,12 @@ telegram-digital-shop-bot
    pip install -r requirements.txt
    ```
 
+3. Укажите переменные окружения:
+   ```bash
+   export BOT_TOKEN="<telegram_bot_token>"
+   export ADMIN_IDS="123456789,987654321"
+   ```
+
 ## Использование
 
 1. Запустите бота:

@@ -3,18 +3,19 @@ class AdminPanel:
         self.product_catalog = product_catalog
 
     def add_product(self, product):
-        self.product_catalog.append(product)
+        self.product_catalog.add_product(product)
 
     def edit_product(self, product_id, updated_product):
-        for index, product in enumerate(self.product_catalog):
-            if product['id'] == product_id:
-                self.product_catalog[index] = updated_product
-                return True
-        return False
+        product = self.product_catalog.get_product_details(product_id)
+        if product is None:
+            return False
+
+        merged_product = {**product, **updated_product, "id": product_id}
+        self.product_catalog.add_product(merged_product)
+        return True
 
     def delete_product(self, product_id):
-        for index, product in enumerate(self.product_catalog):
-            if product['id'] == product_id:
-                del self.product_catalog[index]
-                return True
-        return False
+        if self.product_catalog.get_product_details(product_id) is None:
+            return False
+
+        return self.product_catalog.remove_product(product_id)
