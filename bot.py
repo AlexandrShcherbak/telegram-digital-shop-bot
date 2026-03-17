@@ -4,6 +4,9 @@ import logging
 import os
 import json
 import asyncio
+import tempfile
+from html import escape
+from urllib.parse import urlparse
 from aiogram import Bot, Dispatcher, types, F, Router
 from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton,
@@ -15,8 +18,17 @@ products = {}
 product_id_counter = 1
 user_states = {}  
 
-API_TOKEN = '8246017060:AAFENf3aCiMi57qldIpUzrHePP-RuZF7zxI' # Замените на ваш токен бота
-ADMIN_IDS = [1353502819] # Список Telegram ID админов
+API_TOKEN = os.getenv("BOT_TOKEN", "")
+if not API_TOKEN:
+    raise RuntimeError("BOT_TOKEN is not set")
+
+ADMIN_IDS = [
+    int(admin_id.strip())
+    for admin_id in os.getenv("ADMIN_IDS", "1353502819").split(",")
+    if admin_id.strip().isdigit()
+]
+if not ADMIN_IDS:
+    raise RuntimeError("ADMIN_IDS is empty or invalid")
 
 logging.basicConfig(level=logging.INFO)
 
@@ -140,6 +152,23 @@ LANGUAGES = {
 def get_lang(user_id):
     return user_states.get(user_id, {}).get("lang", "ru")
 
+
+def is_valid_payment_url(url: str) -> bool:
+    parsed = urlparse(url.strip())
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def safe_html(text: str) -> str:
+    return escape(str(text), quote=False)
+
+
+def parse_action_callback(data: str):
+    parts = data.split("_", 2)
+    if len(parts) != 3 or parts[0] not in {"approve", "decline"}:
+        raise ValueError("Invalid callback payload")
+    return parts[0], int(parts[1]), int(parts[2])
+
+
 def t(user_id, key, **kwargs):
     lang = get_lang(user_id)
     return LANGUAGES[lang][key].format(**kwargs)
@@ -226,7 +255,7 @@ async def show_catalog(call: types.CallbackQuery):
         await call.message.answer(t(call.from_user.id, "category_empty"))
         await call.answer()
         return
-    text = f"🛒 <b>{cat}</b>\n\n"
+    text = f"🛒 <b>{safe_html(cat)}</b>\n\n"
     lang = get_lang(call.from_user.id)
     price_word = LANGUAGES[lang]["price"]
     keyboard = [
@@ -236,8 +265,8 @@ async def show_catalog(call: types.CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=keyboard)
     for pid, prod in items:
         text += (
-            f"🔹 <b>{prod['name']}</b>\n"
-            f"📝 {prod['desc']}\n"
+            f"🔹 <b>{safe_html(prod['name'])}</b>\n"
+            f"📝 {safe_html(prod['desc'])}\n"
             f"💵 <b>{price_word}:</b> {prod['price']} {prod['currency']}\n\n"
         )
     await call.message.answer(text, parse_mode="HTML", reply_markup=kb)
@@ -321,13 +350,18 @@ async def add_product_content(msg: types.Message):
 async def add_product_pay_url(msg: types.Message):
     global product_id_counter
     state = user_states[msg.from_user.id]
+    pay_url = msg.text.strip()
+    if not is_valid_payment_url(pay_url):
+        await msg.answer(t(msg.from_user.id, "enter_pay_url"))
+        return
+
     products[product_id_counter] = {
         "name": state["name"],
         "desc": state["desc"],
         "price": state["price"],
         "currency": state["currency"],
         "content": state["content"],
-        "pay_url": msg.text,
+        "pay_url": pay_url,
         "category": state["category"]
     }
     save_products()
@@ -387,6 +421,8 @@ async def change_price_choose(call: types.CallbackQuery):
 async def change_price_set(msg: types.Message):
     try:
         price = int(msg.text)
+        if price <= 0:
+            raise ValueError
         pid = user_states[msg.from_user.id]["pid"]
         products[pid]["price"] = price
         save_products()
@@ -396,7 +432,7 @@ async def change_price_set(msg: types.Message):
         )
         lang = user_states[msg.from_user.id].get("lang", "ru")
         user_states[msg.from_user.id] = {"lang": lang}
-    except Exception:
+    except (ValueError, TypeError, KeyError):
         await msg.answer(t(msg.from_user.id, "enter_number"))
 
 # --- Удаление товара ---
@@ -438,7 +474,7 @@ async def buy_product(call: types.CallbackQuery):
         await call.answer(t(call.from_user.id, "not_found"), show_alert=True)
         return
     await call.message.answer(
-        t(call.from_user.id, "buy_info", name=prod['name'], desc=prod['desc'], price=prod['price'], currency=prod['currency'], pay_url=prod['pay_url']),
+        t(call.from_user.id, "buy_info", name=safe_html(prod['name']), desc=safe_html(prod['desc']), price=prod['price'], currency=safe_html(prod['currency']), pay_url=safe_html(prod['pay_url'])),
         parse_mode="HTML"
     )
     user_states[call.from_user.id] = {"waiting_payment": pid, "lang": get_lang(call.from_user.id)}
@@ -488,9 +524,21 @@ async def handle_payment_proof(msg: types.Message):
 
 @router.callback_query(lambda c: c.data.startswith("approve_") or c.data.startswith("decline_"))
 async def process_payment_decision(call: types.CallbackQuery):
-    action, user_id, pid = call.data.split("_")
-    user_id = int(user_id)
-    pid = int(pid)
+    if call.from_user.id not in ADMIN_IDS:
+        await call.answer(t(call.from_user.id, "access_denied"), show_alert=True)
+        return
+
+    try:
+        action, user_id, pid = parse_action_callback(call.data)
+    except (ValueError, TypeError):
+        await call.answer("Некорректный callback", show_alert=True)
+        return
+
+    pending = pending_payments.get(user_id)
+    if not pending or pending.get("pid") != pid:
+        await call.answer("Платёж уже обработан или не найден", show_alert=True)
+        return
+
     prod = products.get(pid)
     user_lang = get_lang(user_id)
     if not prod:
@@ -504,7 +552,7 @@ async def process_payment_decision(call: types.CallbackQuery):
         pending_payments.pop(user_id, None)
         await bot.send_message(
             user_id,
-            t(user_id, "payment_approved", content=prod['content']),
+            t(user_id, "payment_approved", content=escape(prod['content'])),
             parse_mode="HTML"
         )
         try:
@@ -540,20 +588,26 @@ async def my_purchases(msg: types.Message):
         return
     text = t(msg.from_user.id, "your_purchases")
     for i, prod in enumerate(items, 1):
-        text += f"{i}. <b>{prod['name']}</b> ({prod['desc']}) — <code>{prod['content']}</code>\n"
+        text += f"{i}. <b>{safe_html(prod['name'])}</b> ({safe_html(prod['desc'])}) — <code>{safe_html(prod['content'])}</code>\n"
     await msg.answer(text, parse_mode="HTML")
 
 CATALOG_FILE = "products.json"
 
 def save_products():
-    with open(CATALOG_FILE, "w", encoding="utf-8") as f:
-        json.dump(products, f, ensure_ascii=False, indent=2)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, dir=".") as tmp:
+        json.dump(products, tmp, ensure_ascii=False, indent=2)
+        tmp_path = tmp.name
+    os.replace(tmp_path, CATALOG_FILE)
 
 def load_products():
     global products, product_id_counter
     if os.path.exists(CATALOG_FILE):
         with open(CATALOG_FILE, "r", encoding="utf-8") as f:
-            loaded = json.load(f)
+            try:
+                loaded = json.load(f)
+            except json.JSONDecodeError:
+                logging.exception("Invalid JSON in %s", CATALOG_FILE)
+                loaded = {}
             products.update({int(k): v for k, v in loaded.items()})
         if products:
             product_id_counter = max(products.keys()) + 1
@@ -565,4 +619,3 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
-
